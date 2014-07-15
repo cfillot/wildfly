@@ -75,6 +75,7 @@ public class JASPIAuthenticationMechanism implements AuthenticationMechanism {
 
     public static final AttachmentKey<HttpServerExchange> HTTP_SERVER_EXCHANGE_ATTACHMENT_KEY = AttachmentKey.create(HttpServerExchange.class);
     public static final AttachmentKey<SecurityContext> SECURITY_CONTEXT_ATTACHMENT_KEY = AttachmentKey.create(SecurityContext.class);
+    private static final AttachmentKey<Boolean> ALREADY_WRAPPED = AttachmentKey.create(Boolean.class);
 
     private final String securityDomain;
     private final String configuredAuthMethod;
@@ -146,7 +147,7 @@ public class JASPIAuthenticationMechanism implements AuthenticationMechanism {
         servletRequestContext.setServletRequest((HttpServletRequest) messageInfo.getRequestMessage());
         servletRequestContext.setServletResponse((HttpServletResponse) messageInfo.getResponseMessage());
 
-        secureResponse(exchange, sc, sam, messageInfo, cbh);
+        secureResponse(exchange, sam, messageInfo, cbh);
 
         return outcome;
 
@@ -218,10 +219,19 @@ public class JASPIAuthenticationMechanism implements AuthenticationMechanism {
             }
         }
         Object credential = jbossSct.getUtil().getCredential();
-        return new AccountImpl(userPrincipal, stringRoles, credential);
+        Principal original = null;
+        if(cachedAccount != null) {
+            original = cachedAccount.getPrincipal();
+        }
+        return new AccountImpl(userPrincipal, stringRoles, credential, original);
     }
 
-    private void secureResponse(final HttpServerExchange exchange, final SecurityContext securityContext, final JASPIServerAuthenticationManager sam, final GenericMessageInfo messageInfo, final JASPICallbackHandler cbh) {
+    private void secureResponse(final HttpServerExchange exchange, final JASPIServerAuthenticationManager sam, final GenericMessageInfo messageInfo, final JASPICallbackHandler cbh) {
+        if(exchange.getAttachment(ALREADY_WRAPPED) != null || exchange.isResponseStarted()) {
+            return;
+        }
+        exchange.putAttachment(ALREADY_WRAPPED, true);
+
         // we add a response wrapper to properly invoke the secureResponse, after processing the destination
         exchange.addResponseWrapper(new ConduitWrapper<StreamSinkConduit>() {
             @Override
